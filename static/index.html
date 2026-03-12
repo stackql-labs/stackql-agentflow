@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>agentflow - pipeline observer</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0d1117;
+      color: #c9d1d9;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 13px;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 18px;
+      border-bottom: 1px solid #21262d;
+      flex-shrink: 0;
+    }
+
+    header h1 {
+      font-size: 14px;
+      font-weight: 600;
+      color: #f0f6fc;
+      letter-spacing: 0.04em;
+    }
+
+    #status-badge {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      background: #21262d;
+      color: #8b949e;
+      border: 1px solid #30363d;
+    }
+
+    #status-badge.connected  { background: #0d2b1e; color: #3fb950; border-color: #238636; }
+    #status-badge.running    { background: #0d1b2e; color: #58a6ff; border-color: #1f6feb; }
+    #status-badge.complete   { background: #0d2b1e; color: #3fb950; border-color: #238636; }
+    #status-badge.failed     { background: #2d1114; color: #f85149; border-color: #da3633; }
+
+    #run-id {
+      margin-left: auto;
+      font-size: 11px;
+      color: #6e7681;
+    }
+
+    .main {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    #graph-panel {
+      flex: 1;
+      position: relative;
+      border-right: 1px solid #21262d;
+    }
+
+    #cy {
+      width: 100%;
+      height: 100%;
+    }
+
+    .legend {
+      position: absolute;
+      bottom: 14px;
+      left: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      background: rgba(13,17,23,0.88);
+      border: 1px solid #21262d;
+      border-radius: 6px;
+      padding: 10px 12px;
+    }
+
+    .legend-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      color: #8b949e;
+    }
+
+    .legend-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    #right-panel {
+      width: 380px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+
+    .panel-header {
+      padding: 8px 14px;
+      border-bottom: 1px solid #21262d;
+      font-size: 11px;
+      color: #6e7681;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+
+    #agent-detail {
+      padding: 12px 14px;
+      border-bottom: 1px solid #21262d;
+      min-height: 90px;
+      flex-shrink: 0;
+    }
+
+    #agent-detail h3 {
+      font-size: 13px;
+      color: #f0f6fc;
+      margin-bottom: 6px;
+    }
+
+    .detail-row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 3px;
+      font-size: 11px;
+    }
+
+    .detail-key  { color: #6e7681; }
+    .detail-val  { color: #c9d1d9; }
+
+    #log-panel {
+      flex: 1;
+      overflow-y: auto;
+      padding: 6px 0;
+    }
+
+    .log-entry {
+      padding: 4px 14px;
+      border-bottom: 1px solid #161b22;
+      line-height: 1.5;
+      display: grid;
+      grid-template-columns: 60px 80px 1fr;
+      gap: 6px;
+      align-items: start;
+    }
+
+    .log-entry:hover { background: #161b22; }
+
+    .log-time  { color: #484f58; font-size: 10px; }
+    .log-type  { font-size: 10px; border-radius: 3px; padding: 1px 5px; text-align: center; }
+    .log-msg   { color: #c9d1d9; font-size: 11px; word-break: break-word; }
+
+    .log-type.state_transition  { background:#0d1b2e; color:#58a6ff; }
+    .log-type.agent_started     { background:#1e2b1a; color:#7ee787; }
+    .log-type.agent_completed   { background:#0d2b1e; color:#3fb950; }
+    .log-type.feedback_issued   { background:#2b1b0d; color:#ffa657; }
+    .log-type.tool_called       { background:#1d1b2e; color:#d2a8ff; }
+    .log-type.tool_result       { background:#1d1b2e; color:#d2a8ff; }
+    .log-type.pipeline_started  { background:#0d2b1e; color:#3fb950; }
+    .log-type.pipeline_completed{ background:#0d2b1e; color:#3fb950; }
+    .log-type.pipeline_failed   { background:#2d1114; color:#f85149; }
+    .log-type.log               { background:#21262d; color:#8b949e; }
+
+    #clear-btn {
+      background: none;
+      border: none;
+      color: #484f58;
+      cursor: pointer;
+      font-size: 11px;
+      font-family: inherit;
+      padding: 0;
+    }
+    #clear-btn:hover { color: #8b949e; }
+
+    #module-tabs {
+      display: flex;
+      gap: 4px;
+      padding: 6px 14px;
+      border-bottom: 1px solid #21262d;
+      flex-wrap: wrap;
+      flex-shrink: 0;
+    }
+
+    .module-tab {
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      background: #21262d;
+      color: #8b949e;
+      border: 1px solid #30363d;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .module-tab.active  { background: #1f6feb; color: #f0f6fc; border-color: #388bfd; }
+    .module-tab.passed  { background: #238636; color: #f0f6fc; border-color: #2ea043; }
+    .module-tab.failed  { background: #da3633; color: #f0f6fc; border-color: #f85149; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>agentflow</h1>
+  <span id="status-badge">connecting...</span>
+  <span id="run-id"></span>
+</header>
+
+<div class="main">
+  <div id="graph-panel">
+    <div id="cy"></div>
+    <div class="legend">
+      <div class="legend-row"><div class="legend-dot" style="background:#484f58"></div>pending</div>
+      <div class="legend-row"><div class="legend-dot" style="background:#1f6feb"></div>running</div>
+      <div class="legend-row"><div class="legend-dot" style="background:#2ea043"></div>passed</div>
+      <div class="legend-row"><div class="legend-dot" style="background:#da3633"></div>failed</div>
+      <div class="legend-row"><div class="legend-dot" style="background:#ffa657; border-radius:2px"></div>retry feedback</div>
+    </div>
+  </div>
+
+  <div id="right-panel">
+    <div class="panel-header">
+      <span>agent detail</span>
+    </div>
+    <div id="agent-detail">
+      <div style="color:#484f58;font-size:11px;margin-top:8px">click a node to inspect</div>
+    </div>
+
+    <div id="module-tabs"></div>
+
+    <div class="panel-header">
+      <span>event log</span>
+      <button id="clear-btn" onclick="clearLog()">clear</button>
+    </div>
+    <div id="log-panel"></div>
+  </div>
+</div>
+
+<script>
+// --- state ---
+let cy = null;
+let ws = null;
+let agentStates  = {};   // agent_id -> { state, attempts, module_id, duration_ms }
+let moduleStates = {};   // module_id -> { passed: [], failed: [], running: [] }
+let activeModuleFilter = null;
+let allEvents = [];
+
+// --- cytoscape init ---
+function initGraph(config) {
+  const agents = config.agents || [];
+  const nodes  = agents.map(a => ({
+    data: { id: a.id, label: a.id.replace(/_/g, '\n'), state: 'pending' }
+  }));
+
+  const edges = [];
+  agents.forEach(a => {
+    if (a.dispatch) {
+      const targets = a.dispatch.target
+        ? [a.dispatch.target]
+        : (a.dispatch.targets || []);
+      targets.forEach(t => {
+        edges.push({ data: { id: `${a.id}->${t}`, source: a.id, target: t, type: 'dispatch' } });
+      });
+    }
+    if (a.retry && a.retry.on_fail && a.retry.on_fail.target) {
+      const t = a.retry.on_fail.target;
+      edges.push({ data: { id: `${a.id}->feedback->${t}`, source: a.id, target: t, type: 'feedback' } });
+    }
+  });
+
+  cy = cytoscape({
+    container: document.getElementById('cy'),
+    elements: { nodes, edges },
+    style: [
+      {
+        selector: 'node',
+        style: {
+          'label': 'data(label)',
+          'text-wrap': 'wrap',
+          'text-halign': 'center',
+          'text-valign': 'center',
+          'font-family': 'SF Mono, Fira Code, monospace',
+          'font-size': '10px',
+          'color': '#f0f6fc',
+          'background-color': '#484f58',
+          'width': 90,
+          'height': 55,
+          'border-width': 2,
+          'border-color': '#30363d',
+          'shape': 'roundrectangle',
+          'text-background-color': 'transparent',
+        }
+      },
+      {
+        selector: 'node[state="running"]',
+        style: { 'background-color': '#1f6feb', 'border-color': '#388bfd' }
+      },
+      {
+        selector: 'node[state="passed"]',
+        style: { 'background-color': '#2ea043', 'border-color': '#3fb950' }
+      },
+      {
+        selector: 'node[state="failed"]',
+        style: { 'background-color': '#da3633', 'border-color': '#f85149' }
+      },
+      {
+        selector: 'node[state="pending"]',
+        style: { 'background-color': '#21262d', 'border-color': '#30363d', 'color': '#6e7681' }
+      },
+      {
+        selector: 'edge[type="dispatch"]',
+        style: {
+          'width': 1.5,
+          'line-color': '#30363d',
+          'target-arrow-color': '#30363d',
+          'target-arrow-shape': 'triangle',
+          'curve-style': 'bezier',
+        }
+      },
+      {
+        selector: 'edge[type="feedback"]',
+        style: {
+          'width': 1,
+          'line-color': '#ffa657',
+          'target-arrow-color': '#ffa657',
+          'target-arrow-shape': 'triangle',
+          'curve-style': 'bezier',
+          'line-style': 'dashed',
+          'line-dash-pattern': [4, 3],
+        }
+      },
+      {
+        selector: ':selected',
+        style: { 'border-color': '#f0f6fc', 'border-width': 2.5 }
+      }
+    ],
+    layout: {
+      name: 'breadthfirst',
+      directed: true,
+      padding: 40,
+      spacingFactor: 1.4,
+    }
+  });
+
+  cy.on('tap', 'node', function(evt) {
+    const node = evt.target;
+    const id   = node.data('id');
+    const st   = agentStates[id] || {};
+    const detail = document.getElementById('agent-detail');
+    detail.innerHTML = `
+      <h3>${id}</h3>
+      <div class="detail-row"><span class="detail-key">state</span><span class="detail-val">${st.state || 'pending'}</span></div>
+      <div class="detail-row"><span class="detail-key">attempts</span><span class="detail-val">${st.attempts || 0}</span></div>
+      <div class="detail-row"><span class="detail-key">module</span><span class="detail-val">${st.module_id || '-'}</span></div>
+      <div class="detail-row"><span class="detail-key">last duration</span><span class="detail-val">${st.duration_ms ? st.duration_ms + 'ms' : '-'}</span></div>
+    `;
+  });
+}
+
+// --- event handling ---
+function handleEvent(event) {
+  allEvents.push(event);
+  const p = event.payload;
+  const type = p.type;
+
+  // update run id in header
+  document.getElementById('run-id').textContent = 'run: ' + event.run_id.slice(0, 8);
+
+  // update badge
+  const badge = document.getElementById('status-badge');
+  if (type === 'pipeline_started')   { badge.textContent = 'running';  badge.className = 'running'; }
+  if (type === 'pipeline_completed') { badge.textContent = 'complete'; badge.className = 'complete'; }
+  if (type === 'pipeline_failed')    { badge.textContent = 'failed';   badge.className = 'failed'; }
+
+  // update graph nodes
+  if (cy) {
+    if (type === 'agent_started') {
+      setNodeState(p.agent_id, 'running');
+      agentStates[p.agent_id] = { ...agentStates[p.agent_id], state: 'running', attempts: p.attempt, module_id: p.module_id };
+      updateModuleTab(p.module_id, 'running');
+    }
+    if (type === 'agent_completed') {
+      const state = p.passed ? 'passed' : 'failed';
+      setNodeState(p.agent_id, state);
+      agentStates[p.agent_id] = { ...agentStates[p.agent_id], state, duration_ms: p.duration_ms };
+      if (p.module_id) updateModuleTab(p.module_id, state);
+    }
+    if (type === 'feedback_issued') {
+      // briefly pulse the feedback edge
+      const edgeId = `${p.qa_agent_id}->feedback->${p.target_agent_id}`;
+      const edge = cy.getElementById(edgeId);
+      if (edge.length) {
+        edge.style('width', 3);
+        setTimeout(() => edge.style('width', 1), 800);
+      }
+    }
+  }
+
+  appendLog(event);
+}
+
+function setNodeState(agentId, state) {
+  if (!cy) return;
+  const node = cy.getElementById(agentId);
+  if (node.length) node.data('state', state);
+}
+
+// --- module tabs ---
+function updateModuleTab(moduleId, state) {
+  if (!moduleId) return;
+  if (!moduleStates[moduleId]) moduleStates[moduleId] = { state: 'running' };
+  if (state === 'failed') moduleStates[moduleId].state = 'failed';
+  else if (state === 'passed' && moduleStates[moduleId].state !== 'failed') moduleStates[moduleId].state = 'passed';
+  renderModuleTabs();
+}
+
+function renderModuleTabs() {
+  const container = document.getElementById('module-tabs');
+  container.innerHTML = '';
+  Object.entries(moduleStates).forEach(([id, st]) => {
+    const tab = document.createElement('div');
+    tab.className = 'module-tab' + (st.state === 'passed' ? ' passed' : st.state === 'failed' ? ' failed' : ' active');
+    tab.textContent = id.length > 14 ? id.slice(0, 12) + '..' : id;
+    tab.title = id;
+    tab.onclick = () => filterByModule(id);
+    container.appendChild(tab);
+  });
+}
+
+function filterByModule(moduleId) {
+  activeModuleFilter = activeModuleFilter === moduleId ? null : moduleId;
+  renderLog();
+}
+
+// --- log panel ---
+function appendLog(event) {
+  if (activeModuleFilter) {
+    const p = event.payload;
+    if (p.module_id && p.module_id !== activeModuleFilter) return;
+  }
+  const panel = document.getElementById('log-panel');
+  const el = buildLogEntry(event);
+  panel.appendChild(el);
+  panel.scrollTop = panel.scrollHeight;
+}
+
+function renderLog() {
+  const panel = document.getElementById('log-panel');
+  panel.innerHTML = '';
+  allEvents.forEach(e => appendLog(e));
+}
+
+function buildLogEntry(event) {
+  const p    = event.payload;
+  const type = p.type;
+  const time = new Date(event.timestamp).toLocaleTimeString('en-AU', { hour12: false });
+
+  let msg = '';
+  switch (type) {
+    case 'pipeline_started':   msg = `pipeline "${p.pipeline_name}" started`; break;
+    case 'pipeline_completed': msg = `pipeline complete - ${p.total_modules} modules - ${p.duration_ms}ms`; break;
+    case 'pipeline_failed':    msg = `pipeline FAILED: ${p.reason}`; break;
+    case 'state_transition':   msg = `${p.from} -> ${p.to}`; break;
+    case 'agent_started':      msg = `[${p.agent_id}] started - attempt ${p.attempt}${p.module_id ? ' - mod: ' + p.module_id : ''}`; break;
+    case 'agent_completed':    msg = `[${p.agent_id}] ${p.passed ? 'PASS' : 'FAIL'} - ${p.duration_ms}ms`; break;
+    case 'feedback_issued':    msg = `[${p.qa_agent_id}] -> [${p.target_agent_id}] feedback: ${p.issue_count} issue(s)`; break;
+    case 'tool_called':        msg = `[${p.agent_id}] tool: ${p.tool_id}`; break;
+    case 'tool_result':        msg = `[${p.agent_id}] tool: ${p.tool_id} - ${p.success ? 'ok' : 'error'}`; break;
+    case 'log':                msg = `[${p.level}] ${p.message}`; break;
+    default:                   msg = JSON.stringify(p);
+  }
+
+  const el = document.createElement('div');
+  el.className = 'log-entry';
+  el.innerHTML = `
+    <span class="log-time">${time}</span>
+    <span class="log-type ${type}">${type.replace(/_/g, ' ')}</span>
+    <span class="log-msg">${escHtml(msg)}</span>
+  `;
+  return el;
+}
+
+function escHtml(str) {
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function clearLog() {
+  allEvents = [];
+  document.getElementById('log-panel').innerHTML = '';
+}
+
+// --- websocket ---
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+
+  ws.onopen = () => {
+    const badge = document.getElementById('status-badge');
+    badge.textContent = 'connected';
+    badge.className = 'connected';
+  };
+
+  ws.onmessage = e => {
+    try { handleEvent(JSON.parse(e.data)); }
+    catch(err) { console.error('parse error', err); }
+  };
+
+  ws.onclose = () => {
+    const badge = document.getElementById('status-badge');
+    badge.textContent = 'disconnected - retrying...';
+    badge.className = '';
+    setTimeout(connect, 2000);
+  };
+}
+
+// --- boot ---
+async function boot() {
+  try {
+    const res = await fetch('/api/config');
+    const config = await res.json();
+    initGraph(config);
+  } catch(e) {
+    console.warn('could not load pipeline config', e);
+    initGraph({ agents: [] });
+  }
+  connect();
+}
+
+boot();
+</script>
+</body>
+</html>
