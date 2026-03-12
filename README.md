@@ -1,6 +1,6 @@
 <div align="center">
 <h1>stackql-agentflow</h1>
-<h3>Not (Yet Another) Python Glue Framework</h3>
+<p>Not (Yet Another) Python Glue Framework</p>
 <img src="images/no-spaghetti.png" />
 </div>
 
