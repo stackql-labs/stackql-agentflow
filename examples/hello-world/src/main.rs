@@ -31,15 +31,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // When running with `cargo run -p hello-world` the CWD is the workspace root.
     let yaml_path = locate_pipeline_yaml();
 
-    println!("╔═══════════════════════════════════════════════════════╗");
-    println!("║          stackql-agentflow  hello-world demo           ║");
-    println!("╠═══════════════════════════════════════════════════════╣");
-    println!("║  topic: {:<47} ║", truncate(&topic, 47));
-    println!("╚═══════════════════════════════════════════════════════╝");
-    println!();
+    println!("=========================================================");
+    println!("  stackql-agentflow  |  hello-world demo");
+    println!("=========================================================");
+    println!("  topic : {}", topic);
+    println!("---------------------------------------------------------");
     println!("  observability UI  ->  http://localhost:4000");
     println!("  audit log         ->  hello-world-run.jsonl");
     println!("  ctrl+c to exit after the run completes");
+    println!("=========================================================");
     println!();
 
     let mut pipeline = Pipeline::from_file(&yaml_path, &api_key)?;
@@ -82,10 +82,3 @@ fn locate_pipeline_yaml() -> String {
     "examples/hello-world/pipeline.yaml".to_string()
 }
 
-fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_string()
-    } else {
-        format!("{}…", &s[..max - 1])
-    }
-}

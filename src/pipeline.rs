@@ -1,4 +1,5 @@
 use std::{collections::HashMap, sync::Arc, time::Instant};
+use std::path::PathBuf;
 
 use chrono::Utc;
 use tokio::sync::Mutex;
@@ -24,6 +25,8 @@ use crate::{
 /// tools and sinks, then call [`Pipeline::run`].
 pub struct Pipeline {
     config: PipelineConfig,
+    /// Directory that prompt paths in the YAML are resolved relative to.
+    base_dir: PathBuf,
     claude: Arc<ClaudeClient>,
     tools: HashMap<String, Arc<dyn Tool>>,
     sinks: Vec<Box<dyn LogSink + Send + Sync>>,
@@ -33,20 +36,30 @@ pub struct Pipeline {
 
 impl Pipeline {
     /// Parse a pipeline from a YAML string and an Anthropic API key.
+    /// Prompt paths in the YAML are resolved relative to the current working directory.
     pub fn from_yaml(yaml: &str, api_key: &str) -> Result<Self, AgentFlowError> {
         let config = PipelineConfig::from_yaml(yaml)?;
-        Ok(Self::with_config(config, api_key))
+        Ok(Self::with_config(config, api_key, PathBuf::from(".")))
     }
 
     /// Parse a pipeline from a YAML file on disk and an Anthropic API key.
+    /// Prompt paths in the YAML are resolved relative to the directory containing the YAML file.
     pub fn from_file(path: &str, api_key: &str) -> Result<Self, AgentFlowError> {
-        let yaml = std::fs::read_to_string(path)?;
-        Self::from_yaml(&yaml, api_key)
+        let yaml_path = std::fs::canonicalize(path)
+            .map_err(|e| AgentFlowError::Config(format!("cannot resolve '{}': {}", path, e)))?;
+        let base_dir = yaml_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .to_path_buf();
+        let yaml = std::fs::read_to_string(&yaml_path)?;
+        let config = PipelineConfig::from_yaml(&yaml)?;
+        Ok(Self::with_config(config, api_key, base_dir))
     }
 
-    fn with_config(config: PipelineConfig, api_key: &str) -> Self {
+    fn with_config(config: PipelineConfig, api_key: &str, base_dir: PathBuf) -> Self {
         Self {
             config,
+            base_dir,
             claude: Arc::new(ClaudeClient::new(api_key)),
             tools: HashMap::new(),
             sinks: Vec::new(),
@@ -83,15 +96,11 @@ impl Pipeline {
 
     /// Execute the pipeline with the given `initial_input` and block until
     /// the pipeline reaches a terminal state.
-    ///
-    /// - Starts the observability server on [`Self::obs_port`]
-    /// - Emits `pipeline_started` / `pipeline_completed` / `pipeline_failed`
-    /// - Returns `Ok(())` on success, `Err(AgentFlowError)` on failure
     pub async fn run(&mut self, initial_input: &str) -> Result<(), AgentFlowError> {
         let run_id = uuid::Uuid::new_v4().to_string();
         let start = Instant::now();
 
-        // Hand off sinks to the hub (drains self.sinks)
+        // Hand off sinks to the hub
         let sinks = std::mem::take(&mut self.sinks);
         self.hub.start_sinks(sinks);
 
@@ -107,13 +116,7 @@ impl Pipeline {
             });
         }
 
-        // Give the server a moment to bind
         tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
-
-        eprintln!(
-            "\nobservability UI  ->  http://localhost:{}\n",
-            self.obs_port
-        );
 
         // Initialise state machine
         let state_machine = Arc::new(Mutex::new(StateMachine::new(
@@ -128,8 +131,7 @@ impl Pipeline {
         }
         let retry_governor = Arc::new(Mutex::new(retry_gov));
 
-        let tools: Arc<HashMap<String, Arc<dyn Tool>>> =
-            Arc::new(self.tools.clone());
+        let tools: Arc<HashMap<String, Arc<dyn Tool>>> = Arc::new(self.tools.clone());
 
         // Emit pipeline_started
         self.hub
@@ -162,6 +164,7 @@ impl Pipeline {
 
         let dispatcher = Dispatcher {
             config: self.config.clone(),
+            base_dir: self.base_dir.clone(),
             claude: self.claude.clone(),
             tools,
             hub: self.hub.clone(),
@@ -202,21 +205,20 @@ impl Pipeline {
             }
             Err(ref e) => {
                 let reason = e.to_string();
-                {
+                let prev = {
                     let mut sm = state_machine.lock().await;
-                    let prev = sm.transition("failed")?;
-                    drop(sm);
-                    self.hub
-                        .emit(PipelineEvent {
-                            run_id: run_id.clone(),
-                            timestamp: Utc::now(),
-                            payload: EventPayload::StateTransition {
-                                from: prev,
-                                to: "failed".to_string(),
-                            },
-                        })
-                        .await;
-                }
+                    sm.transition("failed")?
+                };
+                self.hub
+                    .emit(PipelineEvent {
+                        run_id: run_id.clone(),
+                        timestamp: Utc::now(),
+                        payload: EventPayload::StateTransition {
+                            from: prev,
+                            to: "failed".to_string(),
+                        },
+                    })
+                    .await;
                 self.hub
                     .emit(PipelineEvent {
                         run_id: run_id.clone(),
@@ -226,15 +228,12 @@ impl Pipeline {
                         },
                     })
                     .await;
-                // Brief pause so sinks and the UI can receive the final events
                 tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                 return Err(AgentFlowError::PipelineFailed(reason));
             }
         }
 
-        // Brief pause so sinks and the UI can receive the final events
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-
         Ok(())
     }
 }
