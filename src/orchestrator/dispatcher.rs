@@ -176,7 +176,6 @@ impl Dispatcher {
             .unwrap_or(0);
 
         let mut current_content = initial_producer_content;
-        let mut producer_feedback: Vec<QAIssue> = vec![];
         let mut producer_attempt: u32 = 1;
 
         for qa_attempt in 1..=max_attempts {
@@ -212,7 +211,7 @@ impl Dispatcher {
                 })
                 .await;
 
-            producer_feedback = qa_output.issues;
+            let feedback = qa_output.issues;
 
             if backoff_ms > 0 {
                 tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
@@ -223,7 +222,7 @@ impl Dispatcher {
                 .run_agent(
                     producer_id,
                     original_input.to_string(),
-                    producer_feedback.clone(),
+                    feedback,
                     producer_attempt,
                 )
                 .await?;
