@@ -106,21 +106,21 @@ graph TD
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Initialised : Pipeline::from_yaml
+    [*] --> Initialised : from_yaml
 
     Initialised --> Running : first agent starts
-    Running --> WorkDispatched : orchestrator fans out\nwork items in parallel
+    Running --> WorkDispatched : fan out work items
 
     WorkDispatched --> InProgress : first item starts
     InProgress --> QAInProgress : all items generated
 
-    QAInProgress --> QAPassed : all items pass\nall QA gates
-    QAInProgress --> QAInProgress : feedback loop\n(QA fail - retry)
+    QAInProgress --> QAPassed : all items pass all gates
+    QAInProgress --> QAInProgress : feedback loop retry
 
     QAPassed --> Aggregating : aggregator runs
     Aggregating --> Complete : all gates passed
 
-    QAInProgress --> Failed : max retries exceeded\non any item
+    QAInProgress --> Failed : max retries exceeded
     Aggregating --> Failed : any item aborted
 
     Complete --> [*]
