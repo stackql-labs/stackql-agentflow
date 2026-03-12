@@ -1,4 +1,8 @@
-# stackql-agentflow
+<div align="center">
+<h1>stackql-agentflow</h1>
+<h3>Not (Yet Another) Python Glue Framework</h3>
+<img src="images/no-spaghetti.png" />
+</div>
 
 A lightweight, opinionated multi-agent orchestration framework written in Rust.
 Pipelines are defined in YAML. Agents are powered by Claude. State machines are
