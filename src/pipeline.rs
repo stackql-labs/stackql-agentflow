@@ -178,20 +178,25 @@ impl Pipeline {
 
         match result {
             Ok(_) => {
-                let prev = {
+                // Agent transitions (e.g. reviewer on_pass: complete) may have already
+                // moved the state machine to a terminal state — only drive it if not.
+                {
                     let mut sm = state_machine.lock().await;
-                    sm.transition("complete")?
-                };
-                self.hub
-                    .emit(PipelineEvent {
-                        run_id: run_id.clone(),
-                        timestamp: Utc::now(),
-                        payload: EventPayload::StateTransition {
-                            from: prev,
-                            to: "complete".to_string(),
-                        },
-                    })
-                    .await;
+                    if !sm.is_terminal() {
+                        let prev = sm.transition("complete")?;
+                        drop(sm);
+                        self.hub
+                            .emit(PipelineEvent {
+                                run_id: run_id.clone(),
+                                timestamp: Utc::now(),
+                                payload: EventPayload::StateTransition {
+                                    from: prev,
+                                    to: "complete".to_string(),
+                                },
+                            })
+                            .await;
+                    }
+                }
                 self.hub
                     .emit(PipelineEvent {
                         run_id: run_id.clone(),
@@ -205,20 +210,23 @@ impl Pipeline {
             }
             Err(ref e) => {
                 let reason = e.to_string();
-                let prev = {
+                {
                     let mut sm = state_machine.lock().await;
-                    sm.transition("failed")?
-                };
-                self.hub
-                    .emit(PipelineEvent {
-                        run_id: run_id.clone(),
-                        timestamp: Utc::now(),
-                        payload: EventPayload::StateTransition {
-                            from: prev,
-                            to: "failed".to_string(),
-                        },
-                    })
-                    .await;
+                    if !sm.is_terminal() {
+                        let prev = sm.transition("failed")?;
+                        drop(sm);
+                        self.hub
+                            .emit(PipelineEvent {
+                                run_id: run_id.clone(),
+                                timestamp: Utc::now(),
+                                payload: EventPayload::StateTransition {
+                                    from: prev,
+                                    to: "failed".to_string(),
+                                },
+                            })
+                            .await;
+                    }
+                }
                 self.hub
                     .emit(PipelineEvent {
                         run_id: run_id.clone(),
