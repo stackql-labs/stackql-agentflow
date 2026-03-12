@@ -1,0 +1,57 @@
+name: hello-world
+version: "0.1.0"
+
+defaults:
+  model: claude-sonnet-4-6
+  max_tokens: 2048
+
+tools:
+  - id: filesystem
+    type: builtin
+
+state_machine:
+  initial: initialised
+  terminal:
+    - complete
+    - failed
+  states:
+    - id: initialised
+    - id: running
+    - id: complete
+    - id: failed
+
+agents:
+  - id: writer_agent
+    prompt: prompts/writer_agent.md
+    tools:
+      - filesystem
+    transitions:
+      on_start: running
+      on_complete: running
+    dispatch:
+      strategy: sequential
+      target: reviewer_agent
+
+  - id: reviewer_agent
+    prompt: prompts/reviewer_agent.md
+    tools: []
+    retry:
+      max_attempts: 2
+      backoff_ms: 500
+      on_fail:
+        action: feedback_and_retry
+        target: writer_agent
+        feedback_path: "$.issues"
+    transitions:
+      on_pass: complete
+      on_fail: running
+      on_abort: failed
+
+aggregation:
+  strategy: all_pass
+  gates:
+    - reviewer_agent
+  on_complete:
+    transition: complete
+  on_any_abort:
+    transition: failed

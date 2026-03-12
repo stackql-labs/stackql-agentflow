@@ -1,0 +1,15 @@
+[package]
+name        = "hello-world"
+version     = "0.1.0"
+edition     = "2021"
+description = "stackql-agentflow hello-world demo"
+
+[[bin]]
+name = "hello-world"
+path = "src/main.rs"
+
+[dependencies]
+agentflow = { path = "../..", package = "stackql-agentflow" }
+tokio     = { version = "1", features = ["full"] }
+dotenvy   = "0.15"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
