@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 use chrono::Utc;
 use tokio::sync::Mutex;
@@ -25,6 +25,8 @@ use crate::{
 /// manages the QA feedback / retry loop.
 pub struct Dispatcher {
     pub config: PipelineConfig,
+    /// Base directory for resolving relative prompt paths declared in the YAML.
+    pub base_dir: PathBuf,
     pub claude: Arc<ClaudeClient>,
     pub tools: Arc<HashMap<String, Arc<dyn Tool>>>,
     pub hub: Arc<EventHub>,
@@ -120,10 +122,12 @@ impl Dispatcher {
             .or(self.config.defaults.max_tokens)
             .unwrap_or(1024);
 
-        let prompt_text = std::fs::read_to_string(&agent_cfg.prompt).map_err(|e| {
+        let prompt_path = self.base_dir.join(&agent_cfg.prompt);
+        let prompt_text = std::fs::read_to_string(&prompt_path).map_err(|e| {
             AgentFlowError::Config(format!(
                 "failed to read prompt '{}': {}",
-                agent_cfg.prompt, e
+                prompt_path.display(),
+                e
             ))
         })?;
 
